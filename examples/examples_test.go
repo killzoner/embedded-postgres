@@ -13,11 +13,11 @@ import (
 	"github.com/georgysavva/scany/v2/pgxscan"
 
 	prevpgtype "github.com/jackc/pgx/pgtype"
-	// _ "github.com/jackc/pgx/stdlib"
+	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	// _ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
@@ -93,13 +93,13 @@ func Test_ScanOne(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, rows.Err())
 
-		beers := make([]Beer, 0)
-		// beers := make([]BeerBis, 0)
+		// beers := make([]Beer, 0)
+		beers := make([]BeerBis, 0)
 		// pgv5 with pgtype.FlatArray now errors
 
 		for rows.Next() {
-			var b Beer
-			// var b BeerBis
+			// var b Beer
+			var b BeerBis
 			err := rows.StructScan(&b)
 			require.NoError(t, err)
 
