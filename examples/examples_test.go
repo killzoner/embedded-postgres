@@ -1,194 +1,175 @@
 package examples
 
 import (
+	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"testing"
+	"time"
+
+	"database/sql"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/georgysavva/scany/v2/dbscan"
+	"github.com/georgysavva/scany/v2/pgxscan"
+
+	prevpgtype "github.com/jackc/pgx/pgtype"
+	// _ "github.com/jackc/pgx/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapio"
+	"github.com/stretchr/testify/require"
 )
 
-func Test_GooseMigrations(t *testing.T) {
-	database := embeddedpostgres.NewDatabase()
-	if err := database.Start(); err != nil {
-		t.Fatal(err)
+type (
+	Beer struct {
+		Id       int                  `db:"id"`
+		Name     string               `db:"name"`
+		Consumed bool                 `db:"consumed"`
+		Rating   float64              `db:"rating"`
+		Tags     pgtype.Array[string] `db:"tags"`
+	}
+	BeerBis struct {
+		Id       int                  `db:"id"`
+		Name     string               `db:"name"`
+		Consumed bool                 `db:"consumed"`
+		Rating   float64              `db:"rating"`
+		Tags     prevpgtype.TextArray `db:"tags"`
+	}
+)
+
+func Test_ScanOne(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	connString := "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+
+	connect := func() (*sql.DB, error) {
+		db, err := sql.Open("postgres", connString)
+		return db, err
 	}
 
-	defer func() {
-		if err := database.Stop(); err != nil {
-			t.Fatal(err)
-		}
-	}()
+	database := embeddedpostgres.NewDatabase(
+		embeddedpostgres.DefaultConfig().Logger(nil),
+	)
+	err := database.Start()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := database.Stop()
+		require.NoError(t, err)
+	})
 
 	db, err := connect()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if err := goose.Up(db.DB, "./migrations"); err != nil {
-		t.Fatal(err)
-	}
-}
+	err = goose.Up(db, "./migrations")
+	require.NoError(t, err)
 
-func Test_ZapioLogger(t *testing.T) {
-	logger, err := zap.NewProduction()
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() {
+		err = db.Close()
+		require.NoError(t, err)
+	})
 
-	w := &zapio.Writer{Log: logger}
+	time.Sleep(1000)
 
-	database := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Logger(w))
-	if err := database.Start(); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("sqlx", func(t *testing.T) {
+		t.Parallel()
+		// unsupported Scan, storing driver.Value type string into type *pgtype.FlatArray[string]
 
-	defer func() {
-		if err := database.Stop(); err != nil {
-			t.Fatal(err)
+		connect := func() (*sqlx.DB, error) {
+			db, err := sqlx.Open("pgx", connString)
+			return db, err
 		}
-	}()
 
-	db, err := connect()
-	if err != nil {
-		t.Fatal(err)
-	}
+		db, err := connect()
+		require.NoError(t, err)
 
-	if err := goose.Up(db.DB, "./migrations"); err != nil {
-		t.Fatal(err)
-	}
-}
+		rows, err := db.Queryx("SELECT * from beer_catalogue")
+		require.NoError(t, err)
+		require.NoError(t, rows.Err())
 
-func Test_Sqlx_SelectOne(t *testing.T) {
-	database := embeddedpostgres.NewDatabase()
-	if err := database.Start(); err != nil {
-		t.Fatal(err)
-	}
+		beers := make([]Beer, 0)
+		// beers := make([]BeerBis, 0)
+		// pgv5 with pgtype.FlatArray now errors
 
-	defer func() {
-		if err := database.Stop(); err != nil {
-			t.Fatal(err)
+		for rows.Next() {
+			var b Beer
+			// var b BeerBis
+			err := rows.StructScan(&b)
+			require.NoError(t, err)
+
+			beers = append(beers, b)
 		}
-	}()
 
-	db, err := connect()
-	if err != nil {
-		t.Fatal(err)
-	}
+		fmt.Println(beers[0].Tags)
+		require.Equal(t, 1, len(beers))
+	})
 
-	rows := make([]int32, 0)
+	t.Run("dbscan", func(t *testing.T) {
+		t.Parallel()
+		// unsupported Scan, storing driver.Value type string into type *pgtype.FlatArray[string]
 
-	err = db.Select(&rows, "SELECT 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(rows) != 1 {
-		t.Fatal("Expected one row returned")
-	}
-}
-
-func Test_ManyTestsAgainstOneDatabase(t *testing.T) {
-	database := embeddedpostgres.NewDatabase()
-	if err := database.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() {
-		if err := database.Stop(); err != nil {
-			t.Fatal(err)
+		connect := func() (*sql.DB, error) {
+			db, err := sql.Open("pgx", connString)
+			return db, err
 		}
-	}()
 
-	db, err := connect()
-	if err != nil {
-		t.Fatal(err)
-	}
+		db, err := connect()
+		require.NoError(t, err)
 
-	if err := goose.Up(db.DB, "./migrations"); err != nil {
-		t.Fatal(err)
-	}
+		rows, err := db.Query("SELECT * from beer_catalogue")
+		require.NoError(t, err)
+		require.NoError(t, rows.Err())
 
-	tests := []func(t *testing.T){
-		func(t *testing.T) {
-			rows := make([]BeerCatalogue, 0)
-			if err := db.Select(&rows, "SELECT * FROM beer_catalogue WHERE UPPER(name) = UPPER('Elvis Juice')"); err != nil {
-				t.Fatal(err)
-			}
+		api, err := dbscan.NewAPI()
+		require.NoError(t, err)
 
-			if len(rows) != 0 {
-				t.Fatalf("expected 0 rows but got %d", len(rows))
-			}
-		},
-		func(t *testing.T) {
-			_, err := db.Exec(`INSERT INTO beer_catalogue (name, consumed, rating) VALUES ($1, $2, $3)`,
-				"Kernal",
-				true,
-				99.32)
-			if err != nil {
-				t.Fatal(err)
-			}
+		beers := make([]Beer, 0)
 
-			actualBeerCatalogue := make([]BeerCatalogue, 0)
-			if err := db.Select(&actualBeerCatalogue, "SELECT * FROM beer_catalogue WHERE id = 2"); err != nil {
-				t.Fatal(err)
-			}
+		for rows.Next() {
+			var b Beer
+			err := api.ScanRow(&b, rows)
+			require.NoError(t, err)
 
-			expectedBeerCatalogue := BeerCatalogue{
-				ID:       2,
-				Name:     "Kernal",
-				Consumed: true,
-				Rating:   99.32,
-			}
-			if !reflect.DeepEqual(expectedBeerCatalogue, actualBeerCatalogue[0]) {
-				t.Fatalf("expected %+v did not match actual %+v", expectedBeerCatalogue, actualBeerCatalogue)
-			}
-		},
-	}
-
-	for testNumber, test := range tests {
-		t.Run(fmt.Sprintf("%d", testNumber), test)
-	}
-}
-
-func Test_SimpleHttpWebApp(t *testing.T) {
-	database := embeddedpostgres.NewDatabase()
-	if err := database.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() {
-		if err := database.Stop(); err != nil {
-			t.Fatal(err)
+			beers = append(beers, b)
 		}
-	}()
 
-	request := httptest.NewRequest("GET", "/beer-catalogue?name=Punk%20IPA", nil)
-	recorder := httptest.NewRecorder()
+		fmt.Println(beers)
+		require.Equal(t, 1, len(beers))
+	})
 
-	NewApp().router.ServeHTTP(recorder, request)
+	t.Run("pgxscan", func(t *testing.T) {
+		t.Parallel()
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200 but receieved %d", recorder.Code)
-	}
+		db, err := pgx.Connect(ctx, connString)
+		require.NoError(t, err)
 
-	expectedPayload := `[{"id":1,"name":"Punk IPA","consumed":true,"rating":68.29}]`
-	actualPayload := recorder.Body.String()
+		rows, err := db.Query(ctx, "SELECT * from beer_catalogue")
+		require.NoError(t, err)
+		require.NoError(t, rows.Err())
 
-	if actualPayload != expectedPayload {
-		t.Fatalf("expected %+v but receieved %+v", expectedPayload, actualPayload)
-	}
-}
+		dbscanapi, err := dbscan.NewAPI()
+		require.NoError(t, err)
 
-func connect() (*sqlx.DB, error) {
-	db, err := sqlx.Connect("postgres", "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable")
-	return db, err
+		api, err := pgxscan.NewAPI(dbscanapi)
+		require.NoError(t, err)
+
+		beers := make([]Beer, 0)
+
+		for rows.Next() {
+			var b Beer
+			err := api.ScanRow(&b, rows)
+			require.NoError(t, err)
+
+			beers = append(beers, b)
+		}
+
+		fmt.Println(beers)
+		require.Equal(t, 1, len(beers))
+	})
 }
