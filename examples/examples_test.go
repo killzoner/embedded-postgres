@@ -13,11 +13,11 @@ import (
 	"github.com/georgysavva/scany/v2/pgxscan"
 
 	prevpgtype "github.com/jackc/pgx/pgtype"
-	_ "github.com/jackc/pgx/stdlib"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	// _ "github.com/jackc/pgx/v5/stdlib"
+	// _ "github.com/jackc/pgx/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
@@ -82,7 +82,7 @@ func Test_ScanOne(t *testing.T) {
 		// unsupported Scan, storing driver.Value type string into type *pgtype.FlatArray[string]
 
 		connect := func() (*sqlx.DB, error) {
-			db, err := sqlx.Open("pgx", connString)
+			db, err := sqlx.Open("pgx/v5", connString)
 			return db, err
 		}
 
@@ -115,7 +115,7 @@ func Test_ScanOne(t *testing.T) {
 		// unsupported Scan, storing driver.Value type string into type *pgtype.FlatArray[string]
 
 		connect := func() (*sql.DB, error) {
-			db, err := sql.Open("pgx", connString)
+			db, err := sql.Open("pgx/v5", connString)
 			return db, err
 		}
 
