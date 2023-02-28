@@ -93,13 +93,13 @@ func Test_ScanOne(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, rows.Err())
 
-		// beers := make([]Beer, 0)
-		beers := make([]BeerBis, 0)
+		beers := make([]Beer, 0)
+		// beers := make([]BeerBis, 0)
 		// pgv5 with pgtype.FlatArray now errors
 
 		for rows.Next() {
-			// var b Beer
-			var b BeerBis
+			var b Beer
+			// var b BeerBis
 			err := rows.StructScan(&b)
 			require.NoError(t, err)
 
